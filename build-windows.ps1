@@ -1,6 +1,20 @@
 # Ezoo Download - one-click Windows build
 # Installs what is missing (Visual Studio C++ Build Tools, Rust), builds
 # EzooDownload.exe, gets ffmpeg + yt-dlp and makes dist\EzooDownload-Setup.exe.
+#
+# This builds the WINDOWS 7 compatible program (Rust target
+# x86_64-win7-windows-msvc, see .cargo\config.toml). It also runs on
+# Windows 8 / 10 / 11. Build on Windows 10/11 or Windows 7 SP1+ (64-bit).
+#
+# Optional parameters:
+#   -UpdateRepo "owner/repo"   GitHub repository the finished program updates itself from
+#                              (needed if you publish your own releases: the original ones
+#                              are for Windows 10 and the program refuses them on Windows 7)
+#   -FfmpegUrl  "https://...zip"  an ffmpeg zip that still runs on Windows 7
+param(
+    [string]$UpdateRepo = "",
+    [string]$FfmpegUrl = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.0.1-essentials_build.zip"
+)
 
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
@@ -52,7 +66,11 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     Refresh-Path
     if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) { Fail "Rust was installed but not found. Restart the computer and run this again." }
 }
-rustup default stable-msvc | Out-Null
+# Windows 7 needs the nightly toolchain with the Rust sources: the standard
+# library for the win7 target is compiled together with the program.
+rustup toolchain install nightly --profile minimal --component rust-src
+if ($LASTEXITCODE -ne 0) { Fail "Could not install the Rust nightly toolchain." }
+rustup default nightly-x86_64-pc-windows-msvc | Out-Null
 cargo --version
 
 # the version comes from Cargo.toml ([workspace.package] version = "...")
@@ -63,9 +81,16 @@ Write-Host "Version $version"
 # ---------------------------------------------------------------- 3. build
 # a running copy would lock the files we replace
 Get-Process EzooDownload, SwiftGet -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Step "Building EzooDownload.exe (first time: 5-15 minutes)"
-cargo build --release
+Step "Building EzooDownload.exe for Windows 7 and newer (first time: 5-15 minutes)"
+if ($UpdateRepo) { $env:EZOO_UPDATE_REPO = $UpdateRepo }
+cargo win7
 if ($LASTEXITCODE -ne 0) { Fail "The build failed. Scroll up to see the first red 'error' lines." }
+$exePath = "target\x86_64-win7-windows-msvc\release\EzooDownload.exe"
+if (-not (Test-Path $exePath)) { Fail "$exePath was not created." }
+
+Step "Checking that EzooDownload.exe only uses functions Windows 7 has"
+& (Join-Path $PSScriptRoot "tools\check-win7-imports.ps1") -Exe $exePath
+if ($LASTEXITCODE -ne 0) { Fail "The program uses Windows functions that do not exist on Windows 7 (list above)." }
 
 # ---------------------------------------------------------------- 4. package
 # The result is ONE file: dist\EzooDownload-Setup.exe (+ dist\version.json
@@ -87,7 +112,7 @@ foreach ($old in @("extension", "portable", "store", "redist")) {
     if (Test-Path "$dist\$old") { Remove-Item -Recurse -Force "$dist\$old" }
 }
 
-Copy-Item "target\release\EzooDownload.exe" $stage -Force
+Copy-Item $exePath $stage -Force
 foreach ($name in @("extension", "extension-firefox")) {
     $to = Join-Path $stage $name
     if (Test-Path $to) { Remove-Item -Recurse -Force $to }
@@ -100,18 +125,15 @@ Remove-Item "$stage\extension-firefox\manifest.firefox.json" -Force
 Remove-Item "$stage\extension\manifest.firefox.json" -Force -ErrorAction SilentlyContinue
 
 # ffmpeg (joins video + audio) and yt-dlp (finds video links): downloaded
-# once into build-cache, the app keeps them updated by itself afterwards
+# once into build-cache. On Windows 10/11 the app keeps both updated by itself;
+# on Windows 7 / 8 it keeps exactly these two copies (the newest ffmpeg builds
+# and the official yt-dlp.exe need Windows 10).
 if (-not (Test-Path "$cache\ffmpeg.exe")) {
-    Step "Downloading ffmpeg (joins video + audio)"
+    Step "Downloading ffmpeg (joins video + audio) - a build that runs on Windows 7"
     try {
-        # builds published on GitHub: newest stable 64-bit Windows one
-        $rel = Invoke-RestMethod "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest" -Headers @{ "User-Agent" = "EzooDownload-build" }
-        $asset = $rel.assets | Where-Object { $_.name -match '^ffmpeg-n[0-9.]+-latest-win64-gpl-[0-9.]+\.zip$' } |
-            Sort-Object { [version](($_.name -replace '^ffmpeg-n([0-9.]+)-.*$', '$1') + '.0') } | Select-Object -Last 1
-        if (-not $asset) { $asset = $rel.assets | Where-Object { $_.name -eq 'ffmpeg-master-latest-win64-gpl.zip' } | Select-Object -First 1 }
         $zip = Join-Path $env:TEMP "ezoo-ffmpeg.zip"
         $tmp = Join-Path $env:TEMP "ezoo-ffmpeg"
-        Invoke-WebRequest $asset.browser_download_url -OutFile $zip
+        Invoke-WebRequest $FfmpegUrl -OutFile $zip
         if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
         Expand-Archive $zip -DestinationPath $tmp
         $ff = Get-ChildItem $tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
@@ -119,19 +141,26 @@ if (-not (Test-Path "$cache\ffmpeg.exe")) {
         $lic = Get-ChildItem $tmp -Recurse -Filter "LICENSE*" | Select-Object -First 1
         if ($lic) { Copy-Item $lic.FullName "$cache\ffmpeg-LICENSE.txt" -Force }
         Remove-Item -Recurse -Force $tmp, $zip
-        # the same text the app compares with when it looks for updates
-        $u = $asset.updated_at; if ($u -is [datetime]) { $u = $u.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
-        "$($asset.name) $u" | Set-Content "$cache\ffmpeg-version.txt" -NoNewline
+        # a version text that never equals the one of the newest Windows 10 build:
+        # on Windows 10/11 the app then replaces this copy by the newest ffmpeg
+        "windows7-build" | Set-Content "$cache\ffmpeg-version.txt" -NoNewline
     } catch {
-        Write-Host "Could not download ffmpeg now. Ezoo Download gets it by itself later." -ForegroundColor Yellow
+        Write-Host "Could not download ffmpeg now ($FfmpegUrl)." -ForegroundColor Yellow
+        Write-Host "Put a Windows 7 compatible ffmpeg.exe into $cache and run this again." -ForegroundColor Yellow
     }
 }
 if (-not (Test-Path "$cache\yt-dlp.exe")) {
-    Step "Downloading yt-dlp (finds the links of videos)"
+    Step "Downloading yt-dlp (finds the links of videos) - the Windows 7 build"
     try {
-        Invoke-WebRequest "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "$cache\yt-dlp.exe"
+        # the official yt-dlp.exe needs Windows 10; this community fork also publishes a Windows 7 build
+        $rel = Invoke-RestMethod "https://api.github.com/repos/nicolaasjan/yt-dlp/releases/latest" -Headers @{ "User-Agent" = "EzooDownload-build" }
+        $asset = $rel.assets | Where-Object { $_.name -match 'win7' -and $_.name -match '\.exe$' -and $_.name -notmatch 'x86' } | Select-Object -First 1
+        if (-not $asset) { throw "the release has no x64 Windows 7 build" }
+        Invoke-WebRequest $asset.browser_download_url -OutFile "$cache\yt-dlp.exe"
+        "$($rel.tag_name) $($asset.name)" | Set-Content "$cache\yt-dlp-version.txt" -NoNewline
     } catch {
-        Write-Host "Could not download yt-dlp now. Ezoo Download gets it by itself later." -ForegroundColor Yellow
+        Write-Host "Could not download the Windows 7 build of yt-dlp now ($_)." -ForegroundColor Yellow
+        Write-Host "Put a Windows 7 compatible yt-dlp.exe into $cache and run this again." -ForegroundColor Yellow
     }
 }
 # Visual C++ runtime: the program already carries it (static CRT, see
@@ -141,7 +170,7 @@ $redist = Join-Path $cache "redist"
 New-Item -ItemType Directory -Force $redist | Out-Null
 if (Test-Path "$cache\vc_redist.x64.exe") { Copy-Item "$cache\vc_redist.x64.exe" $redist -Force }
 Copy-Item "THIRD-PARTY-NOTICES.txt" $stage -Force
-foreach ($f in @("ffmpeg.exe", "yt-dlp.exe", "ffmpeg-version.txt", "ffmpeg-LICENSE.txt")) {
+foreach ($f in @("ffmpeg.exe", "yt-dlp.exe", "ffmpeg-version.txt", "yt-dlp-version.txt", "ffmpeg-LICENSE.txt")) {
     if (Test-Path "$cache\$f") { Copy-Item "$cache\$f" $tools -Force }
 }
 

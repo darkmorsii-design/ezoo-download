@@ -13,7 +13,19 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-pub const REPO: &str = "AhmedEzo686/ezoo-download";
+/// Where the releases are published. A fork that publishes its own Windows 7
+/// builds sets EZOO_UPDATE_REPO=owner/repo when it runs `cargo win7`.
+pub const REPO: &str = match option_env!("EZOO_UPDATE_REPO") {
+    Some(r) => r,
+    None => "AhmedEzo686/ezoo-download",
+};
+
+/// The original releases are built for Windows 10 and newer. A copy that runs
+/// on Windows 7 / 8 must never replace itself with one of them, so it only
+/// updates from a repository named at build time (EZOO_UPDATE_REPO).
+fn updates_allowed() -> bool {
+    option_env!("EZOO_UPDATE_REPO").is_some() || !crate::system::is_legacy_windows()
+}
 pub const SETUP_NAME: &str = "EzooDownload-Setup.exe";
 
 pub fn version_url() -> String {
@@ -79,6 +91,9 @@ pub fn parse(text: &str) -> anyhow::Result<Release> {
 
 /// The latest release, if it is newer than this program.
 pub async fn check(client: &reqwest::Client) -> anyhow::Result<Option<Release>> {
+    if !updates_allowed() {
+        return Ok(None);
+    }
     let text = client
         .get(version_url())
         .header(reqwest::header::USER_AGENT, crate::config::DEFAULT_USER_AGENT)

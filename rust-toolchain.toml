@@ -1,0 +1,10 @@
+# Windows 7 needs the nightly toolchain: the x86_64-win7-windows-msvc target
+# has no pre-built standard library, so cargo builds it from source
+# (-Zbuild-std, see .cargo/config.toml and the "win7" alias).
+#
+# If a newer nightly ever breaks the build, pin the last one that worked,
+# for example: channel = "nightly-2026-09-01"
+[toolchain]
+channel = "nightly"
+profile = "minimal"
+components = ["rust-src"]

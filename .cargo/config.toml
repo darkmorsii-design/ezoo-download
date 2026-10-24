@@ -1,6 +1,7 @@
 # The C/C++ runtime (vcruntime140.dll and friends) is built into
 # EzooDownload.exe, so the program runs even on computers without the
-# "Visual C++ Redistributable".
+# "Visual C++ Redistributable". On Windows 7 this also means the "Universal
+# C Runtime" update (KB2999226) is NOT needed: the UCRT is linked in too.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
 
@@ -9,3 +10,23 @@ rustflags = ["-C", "target-feature=+crt-static"]
 
 [target.aarch64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# ---- Windows 7 ------------------------------------------------------------
+# Rust 1.78+ no longer produces programs that start on Windows 7 with the
+# normal targets. The Windows 7 targets are tier 3: there is no pre-built
+# standard library, so it is compiled together with the program (needs the
+# nightly toolchain + the rust-src component, see rust-toolchain.toml).
+#
+#     cargo win7
+#
+# builds target\x86_64-win7-windows-msvc\release\EzooDownload.exe, which also
+# runs on Windows 8 / 10 / 11.
+[target.x86_64-win7-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.i686-win7-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[alias]
+win7 = "build --release --target x86_64-win7-windows-msvc -Zbuild-std=std,panic_abort"
+win7-x86 = "build --release --target i686-win7-windows-msvc -Zbuild-std=std,panic_abort"

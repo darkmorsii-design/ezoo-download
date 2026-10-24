@@ -11,8 +11,14 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tokio-util = "0.7"
-# default features = native TLS (SChannel on Windows), HTTP/2, charset, system proxy
-reqwest = { version = "0.12" }
+# TLS is done by rustls (+ the built-in Mozilla root certificates) instead of
+# Windows' SChannel: on Windows 7 SChannel often negotiates only TLS 1.0 and its
+# list of root certificates is outdated, so https://github.com and most
+# download sites fail. The system proxy settings are still read by reqwest.
+# (HTTP/2 is not needed: the engine uses HTTP/1.1 on purpose, see http.rs.)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "charset"] }
+# unpacking the ffmpeg zip without Windows' tar.exe (it does not exist on Windows 7)
+zip = { version = "2", default-features = false, features = ["deflate"] }
 chrono = { version = "0.4", features = ["serde"] }
 directories = "5"
 url = "2"

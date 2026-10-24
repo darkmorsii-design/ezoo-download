@@ -107,6 +107,12 @@ pub fn split_args(s: &str) -> Vec<String> {
     out
 }
 
+/// True on Windows 7 / 8 / 8.1 (anything older than Windows 10). Used to pick
+/// helper programs and update sources that still run there.
+pub fn is_legacy_windows() -> bool {
+    imp::windows_major().map(|major| major < 10).unwrap_or(false)
+}
+
 /// Shut down, sleep or hibernate now (after the countdown).
 pub fn power(action: AfterDone, force: bool) {
     imp::power(action, force)
@@ -156,6 +162,27 @@ mod imp {
         Some(String::from_utf16_lossy(&name[..len]))
     }
 
+    /// The real Windows major version (6 = Vista/7/8, 10 = 10/11). Asked from
+    /// ntdll, so the answer is not changed by compatibility settings.
+    pub fn windows_major() -> Option<u32> {
+        #[repr(C)]
+        struct OsVersionInfoW {
+            size: u32,
+            major: u32,
+            minor: u32,
+            build: u32,
+            platform: u32,
+            csd: [u16; 128],
+        }
+        #[link(name = "ntdll", kind = "raw-dylib")]
+        extern "system" {
+            fn RtlGetVersion(info: *mut OsVersionInfoW) -> i32;
+        }
+        let mut info = OsVersionInfoW { size: std::mem::size_of::<OsVersionInfoW>() as u32, major: 0, minor: 0, build: 0, platform: 0, csd: [0; 128] };
+        let status = unsafe { RtlGetVersion(&mut info) };
+        (status == 0).then_some(info.major)
+    }
+
     pub fn power(action: AfterDone, force: bool) {
         use std::os::windows::process::CommandExt;
         let run = |args: &[&str]| {
@@ -189,6 +216,9 @@ mod imp {
         None
     }
     pub fn file_system(_dir: &Path) -> Option<String> {
+        None
+    }
+    pub fn windows_major() -> Option<u32> {
         None
     }
     pub fn power(_action: AfterDone, _force: bool) {}

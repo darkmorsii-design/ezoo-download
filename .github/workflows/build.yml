@@ -1,4 +1,4 @@
-name: Build Ezoo Download for Windows
+name: Build Ezoo Download for Windows 7 and newer
 
 # Every push: build and keep the result as an artifact.
 # A push to main whose commit message contains [release] also publishes a
@@ -21,7 +21,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Windows 7 needs nightly + the Rust sources (the standard library of
+      # the x86_64-win7-windows-msvc target is built together with the program)
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -40,8 +44,14 @@ jobs:
             Select-Object -First 40 | ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
           if ($code -ne 0) { Write-Host "::warning::engine tests failed (exit $code)" }
           exit 0
-      - name: Build release
-        run: cargo build --release
+      - name: Build release (Windows 7 compatible)
+        env:
+          # the program updates itself from the releases of THIS repository
+          EZOO_UPDATE_REPO: ${{ github.repository }}
+        run: cargo win7
+      - name: Check Windows 7 imports
+        shell: pwsh
+        run: ./tools/check-win7-imports.ps1 -Exe target/x86_64-win7-windows-msvc/release/EzooDownload.exe
       - name: Package
         shell: pwsh
         run: |
@@ -54,25 +64,28 @@ jobs:
           # everything for the setup is gathered here; the result is the setup only
           $p = "build-cache/stage"
           New-Item -ItemType Directory -Force "$p/tools", "dist" | Out-Null
-          Copy-Item target/release/EzooDownload.exe $p
+          Copy-Item target/x86_64-win7-windows-msvc/release/EzooDownload.exe $p
           Copy-Item THIRD-PARTY-NOTICES.txt $p
           Copy-Item -Recurse extension "$p/extension"
           Copy-Item -Recurse extension "$p/extension-firefox"
           Remove-Item -Recurse -Force "$p/extension/test", "$p/extension-firefox/test"
           Copy-Item -Force "$p/extension-firefox/manifest.firefox.json" "$p/extension-firefox/manifest.json"
           Remove-Item -Force "$p/extension-firefox/manifest.firefox.json", "$p/extension/manifest.firefox.json"
-          $rel = Invoke-RestMethod "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest" -Headers @{ "User-Agent" = "EzooDownload-ci"; "Authorization" = "Bearer ${{ github.token }}" }
-          $asset = $rel.assets | Where-Object { $_.name -match '^ffmpeg-n[0-9.]+-latest-win64-gpl-[0-9.]+\.zip$' } |
-            Sort-Object { [version](($_.name -replace '^ffmpeg-n([0-9.]+)-.*$', '$1') + '.0') } | Select-Object -Last 1
-          Invoke-WebRequest $asset.browser_download_url -OutFile ffmpeg.zip
+          # ffmpeg: a build that still runs on Windows 7 (the newest rolling builds need Windows 10)
+          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.0.1-essentials_build.zip" -OutFile ffmpeg.zip
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp
           Copy-Item (Get-ChildItem ffmpeg-tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName "$p/tools/"
           # GPL: the FFmpeg license goes next to the program
           $lic = Get-ChildItem ffmpeg-tmp -Recurse -Filter "LICENSE*" | Select-Object -First 1
           if ($lic) { Copy-Item $lic.FullName "$p/tools/ffmpeg-LICENSE.txt" }
-          $u = $asset.updated_at; if ($u -is [datetime]) { $u = $u.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
-          "$($asset.name) $u" | Set-Content "$p/tools/ffmpeg-version.txt" -NoNewline
-          Invoke-WebRequest https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe -OutFile "$p/tools/yt-dlp.exe"
+          # never equal to a Windows 10 build's version: on Windows 10/11 the app replaces this copy by the newest ffmpeg
+          "windows7-build" | Set-Content "$p/tools/ffmpeg-version.txt" -NoNewline
+          # yt-dlp: the official yt-dlp.exe needs Windows 10; this fork publishes a Windows 7 build
+          $ytrel = Invoke-RestMethod "https://api.github.com/repos/nicolaasjan/yt-dlp/releases/latest" -Headers @{ "User-Agent" = "EzooDownload-ci"; "Authorization" = "Bearer ${{ github.token }}" }
+          $yt = $ytrel.assets | Where-Object { $_.name -match 'win7' -and $_.name -match '\.exe$' -and $_.name -notmatch 'x86' } | Select-Object -First 1
+          if (-not $yt) { throw "no x64 Windows 7 build of yt-dlp in the release" }
+          Invoke-WebRequest $yt.browser_download_url -OutFile "$p/tools/yt-dlp.exe"
+          "$($ytrel.tag_name) $($yt.name)" | Set-Content "$p/tools/yt-dlp-version.txt" -NoNewline
           choco install innosetup -y --no-progress
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q "/DMyAppVersion=$version" installer\ezoo.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }

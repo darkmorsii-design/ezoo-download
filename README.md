@@ -6,7 +6,7 @@
 
 تطوير **Ahmed Ezzat**
 
-![Windows](https://img.shields.io/badge/Windows-10%20%2C%2011-0078D6?style=flat-square&logo=windows11&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-7%20%2C%208%20%2C%2010%20%2C%2011-0078D6?style=flat-square&logo=windows11&logoColor=white)
 ![Rust](https://img.shields.io/badge/Made%20with-Rust-B7410E?style=flat-square&logo=rust&logoColor=white)
 ![Language](https://img.shields.io/badge/UI-عربي%20%7C%20English-success?style=flat-square)
 
@@ -55,7 +55,8 @@
 
 ## ⚙️ متطلبات التشغيل
 
-- **Windows 10 أو Windows 11** (إصدار 64-bit)
+- **Windows 7 (SP1) أو Windows 8 أو 10 أو 11** (إصدار 64-bit)
+- على Windows 7 مش محتاج تثبيت أي تحديثات إضافية، ولو كرت الشاشة مفيهوش تعريف يدعم OpenGL البرنامج بيستخدم الرسم البرمجي تلقائياً
 - اتصال بالإنترنت
 
 ---
