@@ -8,3 +8,5 @@
 channel = "nightly"
 profile = "minimal"
 components = ["rust-src"]
+
+# (build trigger)
