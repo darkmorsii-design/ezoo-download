@@ -48,7 +48,20 @@ jobs:
         env:
           # the program updates itself from the releases of THIS repository
           EZOO_UPDATE_REPO: ${{ github.repository }}
-        run: cargo win7
+        shell: pwsh
+        run: |
+          cargo win7 2>&1 | Tee-Object -FilePath build-log.txt
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            # the first errors show up as annotations on the run page
+            $lines = Get-Content build-log.txt
+            $idx = 0..($lines.Count - 1) | Where-Object { $lines[$_] -match '^error' } | Select-Object -First 6
+            foreach ($i in $idx) {
+              $chunk = ($lines[$i..([Math]::Min($i + 8, $lines.Count - 1))] -join ' | ')
+              Write-Host "::error::$chunk"
+            }
+          }
+          exit $code
       - name: Check Windows 7 imports
         shell: pwsh
         run: ./tools/check-win7-imports.ps1 -Exe target/x86_64-win7-windows-msvc/release/EzooDownload.exe
