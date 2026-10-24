@@ -39,3 +39,14 @@ path = "src/main.rs"
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.19"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Media_Audio"] }
+
+# Windows 7 target fix: windows-targets 0.48.5 (pulled in by an older
+# dependency) only fetches its import library for the exact target name
+# "x86_64-pc-windows-msvc", not for "x86_64-win7-windows-msvc", so linking failed
+# with LNK1181 "cannot open windows.0.48.5.lib". Naming the crate here makes
+# Cargo build it for every msvc target and add its lib folder to the linker path.
+[target.'cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))'.dependencies]
+windows_x86_64_msvc = "=0.48.5"
+
+[target.'cfg(all(windows, target_arch = "x86", target_env = "msvc"))'.dependencies]
+windows_i686_msvc = "=0.48.5"
